@@ -78,6 +78,34 @@
             text-align: center;
         }
         
+        .weather-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        
+        .weather-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .city-badge {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        
+        .region-info {
+            background: rgba(255,255,255,0.1);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            border-left: 4px solid #667eea;
+        }
+        
         .news-item {
             background: rgba(255,255,255,0.1);
             padding: 1rem;
@@ -435,6 +463,72 @@
     <!-- Toast通知容器 -->
     <div class="toast-container" id="toastContainer"></div>
 
+    <!-- 新闻讨论模态框 -->
+    <div class="modal fade" id="discussionModal" tabindex="-1" aria-labelledby="discussionModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="discussionModalLabel">
+                        <i class="fas fa-comments me-2"></i>与AI讨论新闻
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <!-- 左侧：新闻信息和输入 -->
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <h6>新闻标题：</h6>
+                                <p id="discussionNewsTitle" class="text-primary fw-bold"></p>
+                            </div>
+                            <div class="mb-3">
+                                <label for="discussionQuestion" class="form-label">您的问题：</label>
+                                <textarea class="form-control" id="discussionQuestion" rows="3" 
+                                          placeholder="请输入您想与AI讨论的问题，例如：这条新闻的主要影响是什么？未来发展趋势如何？"></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <button type="button" class="btn btn-primary" onclick="submitDiscussion()">
+                                    <i class="fas fa-paper-plane me-2"></i>提交讨论
+                                </button>
+                                <button type="button" class="btn btn-secondary ms-2" onclick="clearDiscussion()">
+                                    <i class="fas fa-eraser me-2"></i>清空输入
+                                </button>
+                                <button type="button" class="btn btn-warning ms-2" onclick="clearConversationHistory()">
+                                    <i class="fas fa-trash me-2"></i>清除历史
+                                </button>
+                            </div>
+                            <div id="discussionLoading" style="display: none;">
+                                <div class="text-center">
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="visually-hidden">AI正在思考...</span>
+                                    </div>
+                                    <p class="mt-2">AI正在分析新闻内容，请稍候...</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 右侧：对话历史 -->
+                        <div class="col-md-6">
+                            <h6>对话历史 <span id="conversationCount" class="badge bg-secondary">0</span></h6>
+                            <div id="conversationHistory" class="border rounded p-3" style="max-height: 400px; overflow-y: auto;">
+                                <p class="text-muted text-center">暂无对话历史</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="discussionResult" style="display: none;">
+                        <hr>
+                        <h6>最新回复：</h6>
+                        <div class="alert alert-info" id="discussionAnswer"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let currentModel = '';
@@ -442,6 +536,13 @@
         let availableCities = [];
         let citySuggestionsTimeout;
         let currentNewsData = []; // 存储当前新闻数据
+        let currentDiscussionNews = null; // 存储当前讨论的新闻信息
+        let currentSessionId = ''; // 当前会话ID
+
+        // 生成会话ID
+        function generateSessionId() {
+            return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
 
         function showLoading() {
             document.getElementById('loading').style.display = 'block';
@@ -500,33 +601,49 @@
             const citySuggestions = document.getElementById('citySuggestions');
             
             cityInput.addEventListener('input', function() {
-                clearTimeout(citySuggestionsTimeout);
+                const query = this.value.trim();
+                
+                if (citySuggestionsTimeout) {
+                    clearTimeout(citySuggestionsTimeout);
+                }
+                
+                if (query.length < 1) {
+                    citySuggestions.innerHTML = '';
+                    citySuggestions.style.display = 'none';
+                    return;
+                }
+                
                 citySuggestionsTimeout = setTimeout(() => {
-                    const query = this.value.toLowerCase();
-                    if (query.length < 1) {
-                        citySuggestions.style.display = 'none';
-                        return;
-                    }
-                    
                     const filteredCities = availableCities.filter(city => 
-                        city.toLowerCase().includes(query)
+                        city.toLowerCase().includes(query.toLowerCase())
                     ).slice(0, 10);
                     
                     if (filteredCities.length > 0) {
                         citySuggestions.innerHTML = filteredCities.map(city => 
-                            `<div class="city-suggestion-item" onclick="selectCity('${city}')">${city}</div>`
+                            `<div class="suggestion-item" onclick="selectCity('${city}')">${city}</div>`
                         ).join('');
                         citySuggestions.style.display = 'block';
                     } else {
-                        citySuggestions.style.display = 'none';
+                        citySuggestions.innerHTML = '<div class="suggestion-item text-muted">未找到匹配的城市</div>';
+                        citySuggestions.style.display = 'block';
                     }
                 }, 300);
             });
             
-            // 点击其他地方隐藏建议
+            // 点击外部隐藏建议
             document.addEventListener('click', function(e) {
                 if (!cityInput.contains(e.target) && !citySuggestions.contains(e.target)) {
                     citySuggestions.style.display = 'none';
+                }
+            });
+            
+            // 回车键选择城市并自动刷新
+            cityInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    const selectedCity = this.value.trim();
+                    if (selectedCity && availableCities.includes(selectedCity)) {
+                        selectCity(selectedCity);
+                    }
                 }
             });
         }
@@ -534,6 +651,55 @@
         function selectCity(city) {
             document.getElementById('cityInput').value = city;
             document.getElementById('citySuggestions').style.display = 'none';
+            
+            // 自动刷新所有信息
+            autoRefreshAllInfo(city);
+        }
+
+        async function autoRefreshAllInfo(city) {
+            showLoading();
+            showToast(`正在更新 ${city} 的信息...`, 'info');
+            
+            try {
+                // 并行获取天气、新闻和AI汇总
+                const [weatherResponse, newsResponse, summaryResponse] = await Promise.all([
+                    fetch(`/api/weather?city=${encodeURIComponent(city)}`),
+                    fetch(`/api/news?city=${encodeURIComponent(city)}&limit=10`),
+                    fetch(`/api/summary?city=${encodeURIComponent(city)}`)
+                ]);
+                
+                const weatherData = await weatherResponse.json();
+                const newsData = await newsResponse.json();
+                const summaryData = await summaryResponse.json();
+                
+                // 更新天气信息
+                if (weatherData.success) {
+                    displayWeather(weatherData.data);
+                } else {
+                    showToast('获取天气信息失败', 'error');
+                }
+                
+                // 更新新闻信息
+                if (newsData.success) {
+                    currentNewsData = newsData.data || [];
+                    displayNews(newsData.data);
+                } else {
+                    showToast('获取新闻信息失败', 'error');
+                }
+                
+                // 更新AI汇总
+                if (summaryData.success) {
+                    displaySummary(summaryData.data);
+                    showToast(`成功更新 ${city} 的所有信息`, 'success');
+                } else {
+                    showToast('获取AI汇总失败', 'error');
+                }
+                
+            } catch (error) {
+                showToast('网络错误：' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
         }
 
         async function loadModels() {
@@ -646,37 +812,39 @@
             }
         }
 
-        function displayWeather(weather) {
+        function displayWeather(weatherData) {
             const content = `
                 <div class="weather-info">
                     <div class="weather-item">
-                        <h4>${weather.temperature}°C</h4>
-                        <p>当前温度</p>
+                        <div class="weather-value">${weatherData.temperature}°C</div>
+                        <div class="weather-label">当前温度</div>
                     </div>
                     <div class="weather-item">
-                        <h4>${weather.feels_like}°C</h4>
-                        <p>体感温度</p>
+                        <div class="weather-value">${weatherData.feels_like}°C</div>
+                        <div class="weather-label">体感温度</div>
                     </div>
                     <div class="weather-item">
-                        <h4>${weather.description}</h4>
-                        <p>天气状况</p>
+                        <div class="weather-value">${weatherData.description}</div>
+                        <div class="weather-label">天气状况</div>
                     </div>
                     <div class="weather-item">
-                        <h4>${weather.humidity}%</h4>
-                        <p>湿度</p>
+                        <div class="weather-value">${weatherData.humidity}%</div>
+                        <div class="weather-label">湿度</div>
                     </div>
                     <div class="weather-item">
-                        <h4>${weather.wind_speed} km/h</h4>
-                        <p>风速</p>
+                        <div class="weather-value">${weatherData.wind_speed} km/h</div>
+                        <div class="weather-label">风速</div>
                     </div>
                     <div class="weather-item">
-                        <h4>${weather.wind_direction}</h4>
-                        <p>风向</p>
+                        <div class="weather-value">${weatherData.wind_direction}</div>
+                        <div class="weather-label">风向</div>
                     </div>
                 </div>
                 <div class="mt-3">
-                    <small>更新时间：${weather.update_time}</small>
-                    ${weather.note ? `<br><small class="text-warning">${weather.note}</small>` : ''}
+                    <small class="text-muted">
+                        <i class="fas fa-map-marker-alt me-1"></i>
+                        <strong>${weatherData.city}</strong> | 更新时间: ${weatherData.update_time}
+                    </small>
                 </div>
             `;
             
@@ -706,26 +874,67 @@
         }
 
         function displayNews(newsList) {
-            const content = newsList.map((news, index) => `
-                <div class="news-item">
-                    <div class="news-title">
-                        <a href="${news.url || '#'}" 
-                           class="news-link ${!news.url || news.url === '#' ? 'disabled' : ''}" 
-                           target="_blank" 
-                           onclick="handleNewsClick(event, ${index})">
-                            ${news.title}
-                        </a>
+            const content = newsList.map((news, index) => {
+                // 根据相关程度设置样式
+                let relevanceBadgeClass = 'bg-secondary';
+                let relevanceIcon = '🔗';
+                
+                if (news.relevance_level === '高度相关') {
+                    relevanceBadgeClass = 'bg-danger';
+                    relevanceIcon = '🔥';
+                } else if (news.relevance_level === '相关') {
+                    relevanceBadgeClass = 'bg-warning';
+                    relevanceIcon = '⭐';
+                } else if (news.relevance_level === '一般相关') {
+                    relevanceBadgeClass = 'bg-info';
+                    relevanceIcon = '📌';
+                }
+                
+                return `
+                    <div class="news-item">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div class="news-title flex-grow-1">
+                                <a href="${news.url || '#'}" 
+                                   class="news-link ${!news.url || news.url === '#' ? 'disabled' : ''}" 
+                                   target="_blank" 
+                                   onclick="handleNewsClick(event, ${index})">
+                                    ${news.title}
+                                </a>
+                            </div>
+                            <div class="ms-2">
+                                <span class="badge ${relevanceBadgeClass} me-1" title="相关程度: ${news.relevance_score}分">
+                                    ${relevanceIcon} ${news.relevance_level}
+                                </span>
+                                <button class="btn btn-sm btn-outline-primary" 
+                                        onclick="openDiscussionModal('${news.title}', '${news.url}', ${index})"
+                                        title="与AI讨论此新闻">
+                                    <i class="fas fa-comments"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="news-meta">
+                            <span class="badge bg-light text-dark me-2">${news.source}</span>
+                            <span class="badge bg-secondary me-2">${news.category}</span>
+                            <span class="text-muted">${news.publish_time}</span>
+                        </div>
+                        <div class="mt-2">${news.summary}</div>
                     </div>
-                    <div class="news-meta">
-                        <span class="badge bg-light text-dark me-2">${news.source}</span>
-                        <span class="badge bg-secondary me-2">${news.category}</span>
-                        <span class="text-muted">${news.publish_time}</span>
-                    </div>
-                    <div class="mt-2">${news.summary}</div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
             
-            document.getElementById('newsContent').innerHTML = content;
+            // 添加地区标注
+            const cityInput = document.getElementById('cityInput');
+            const currentCity = cityInput.value || '北京';
+            const newsHeader = `
+                <div class="mb-3">
+                    <small class="text-muted">
+                        <i class="fas fa-map-marker-alt me-1"></i>
+                        <strong>${currentCity}</strong> 相关新闻 | 共 ${newsList.length} 条
+                    </small>
+                </div>
+            `;
+            
+            document.getElementById('newsContent').innerHTML = newsHeader + content;
             document.getElementById('newsCard').style.display = 'block';
         }
 
@@ -772,6 +981,18 @@
             
             // 显示AI汇总（支持markdown格式和新闻链接）
             if (data.summary) {
+                // 添加地区标注
+                const cityInput = document.getElementById('cityInput');
+                const currentCity = cityInput.value || '北京';
+                const summaryHeader = `
+                    <div class="mb-3">
+                        <small class="text-muted">
+                            <i class="fas fa-map-marker-alt me-1"></i>
+                            <strong>${currentCity}</strong> AI智能汇总
+                        </small>
+                    </div>
+                `;
+                
                 // 简单的markdown渲染，并处理新闻链接
                 let markdownContent = data.summary
                     .replace(/^# (.*$)/gim, '<h1>$1</h1>')
@@ -800,15 +1021,160 @@
                     });
                 }
                 
-                document.getElementById('summaryContent').innerHTML = markdownContent;
+                document.getElementById('summaryContent').innerHTML = summaryHeader + markdownContent;
                 document.getElementById('summaryCard').style.display = 'block';
             }
         }
 
+        // 新闻讨论相关函数
+        function openDiscussionModal(title, url, index) {
+            currentDiscussionNews = {
+                title: title,
+                url: url,
+                index: index
+            };
+            
+            // 生成新的会话ID
+            currentSessionId = generateSessionId();
+            
+            document.getElementById('discussionNewsTitle').textContent = title;
+            document.getElementById('discussionQuestion').value = '';
+            document.getElementById('discussionResult').style.display = 'none';
+            document.getElementById('discussionAnswer').textContent = '';
+            document.getElementById('conversationCount').textContent = '0';
+            document.getElementById('conversationHistory').innerHTML = '<p class="text-muted text-center">暂无对话历史</p>';
+            
+            const modal = new bootstrap.Modal(document.getElementById('discussionModal'));
+            modal.show();
+        }
+
+        async function submitDiscussion() {
+            if (!currentDiscussionNews) {
+                showToast('请先选择要讨论的新闻', 'error');
+                return;
+            }
+            
+            const question = document.getElementById('discussionQuestion').value.trim();
+            if (!question) {
+                showToast('请输入您的问题', 'error');
+                return;
+            }
+            
+            // 显示加载状态
+            document.getElementById('discussionLoading').style.display = 'block';
+            document.getElementById('discussionResult').style.display = 'none';
+            
+            try {
+                const response = await fetch('/api/discuss-news', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url: currentDiscussionNews.url,
+                        question: question,
+                        session_id: currentSessionId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // 更新对话历史显示
+                    updateConversationHistory(question, data.data.answer);
+                    document.getElementById('conversationCount').textContent = data.data.conversation_count;
+                    
+                    // 显示最新回复
+                    document.getElementById('discussionAnswer').textContent = data.data.answer;
+                    document.getElementById('discussionResult').style.display = 'block';
+                    
+                    // 清空输入框
+                    document.getElementById('discussionQuestion').value = '';
+                    
+                    showToast('AI回复已生成', 'success');
+                } else {
+                    showToast('讨论失败：' + data.error, 'error');
+                }
+            } catch (error) {
+                showToast('网络错误：' + error.message, 'error');
+            } finally {
+                document.getElementById('discussionLoading').style.display = 'none';
+            }
+        }
+
+        function updateConversationHistory(question, answer) {
+            const historyContainer = document.getElementById('conversationHistory');
+            
+            // 移除"暂无对话历史"提示
+            if (historyContainer.querySelector('.text-muted')) {
+                historyContainer.innerHTML = '';
+            }
+            
+            // 添加新的对话记录
+            const conversationItem = document.createElement('div');
+            conversationItem.className = 'mb-3 p-2 border-start border-primary';
+            conversationItem.innerHTML = `
+                <div class="mb-2">
+                    <strong class="text-primary">问：</strong>
+                    <span>${question}</span>
+                </div>
+                <div>
+                    <strong class="text-success">答：</strong>
+                    <span>${answer}</span>
+                </div>
+            `;
+            
+            historyContainer.appendChild(conversationItem);
+            
+            // 滚动到底部
+            historyContainer.scrollTop = historyContainer.scrollHeight;
+        }
+
+        async function clearConversationHistory() {
+            if (!currentSessionId) {
+                showToast('没有可清除的对话历史', 'info');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/clear-conversation', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        session_id: currentSessionId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('conversationHistory').innerHTML = '<p class="text-muted text-center">暂无对话历史</p>';
+                    document.getElementById('conversationCount').textContent = '0';
+                    showToast('对话历史已清除', 'success');
+                } else {
+                    showToast('清除失败：' + data.error, 'error');
+                }
+            } catch (error) {
+                showToast('网络错误：' + error.message, 'error');
+            }
+        }
+
+        function clearDiscussion() {
+            document.getElementById('discussionQuestion').value = '';
+            document.getElementById('discussionResult').style.display = 'none';
+            document.getElementById('discussionAnswer').textContent = '';
+        }
+
         // 页面加载完成后的初始化
         document.addEventListener('DOMContentLoaded', async function() {
+            console.log('页面加载完成，开始初始化...');
+            
             // 加载城市列表
             await loadCities();
+            
+            // 设置城市自动完成
             setupCityAutocomplete();
             
             // 加载模型列表
@@ -822,8 +1188,12 @@
                 }
             });
             
-            // 自动获取汇总信息
-            getSummary();
+            // 设置默认城市并自动加载信息
+            const defaultCity = '北京';
+            document.getElementById('cityInput').value = defaultCity;
+            
+            // 自动加载默认城市的所有信息
+            await autoRefreshAllInfo(defaultCity);
         });
     </script>
 </body>
